@@ -1,0 +1,5 @@
+name = Authcache Filesystem Storage Backend
+description = Authcache storage backend serving cached pages directly from the filesystem
+package = Performance and scalability
+core = 7.x
+dependencies[] = authcache
