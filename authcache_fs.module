@@ -66,6 +66,28 @@ function authcache_fs_authcache_backend_cache_save($body, $headers, $page_compre
 }
 
 /**
+ * Implements hook_authcache_backend_key_set().
+ */
+function authcache_fs_authcache_backend_key_set($key, $lifetime, $has_session) {
+  $basedir = authcache_fs_root();
+  if (!$basedir) {
+    return;
+  }
+
+  // Clear out old key.
+  $previous_session = authcache_backend_initial_session_id();
+  if ($previous_session) {
+    @unlink($basedir . '/sess-' . $previous_session);
+  }
+
+  if ($has_session && authcache_account_allows_caching()) {
+    // Symlink to key-directory.
+    $keydir = authcache_fs_keydir($key);
+    authcache_fs_symlink($keydir, $basedir . '/sess-' . session_id());
+  }
+}
+
+/**
  * Implements hook_expire_cache().
  */
 function authcache_fs_expire_cache($urls, $wildcards, $object_type, $object) {
@@ -127,37 +149,6 @@ function authcache_fs_cron() {
   // Remove expired session symlinks.
   foreach ($paths as $path) {
     @unlink($path);
-  }
-}
-
-/**
- * Make the key available for subsequent request from the same client.
- */
-function authcache_fs_authcache_key_ensure_present($key, $lifetime, $current_session, $previous_session) {
-  $basedir = authcache_fs_root();
-  if (!$basedir) {
-    return FALSE;
-  }
-
-  if ($previous_session && $previous_session != $current_session) {
-    @unlink($basedir . '/sess-' . $previous_session);
-  }
-
-  @mkdir($basedir . '/key-' . $key);
-  @symlink('key-' . $key, $basedir . '/sess-' . $current_session);
-}
-
-/**
- * Make sure there is no key used on subsequent requests from the same client.
- */
-function authcache_fs_authcache_key_ensure_absent($current_session, $previous_session) {
-  $basedir = authcache_fs_root();
-  if (!$basedir) {
-    return FALSE;
-  }
-
-  if ($previous_session && $previous_session != $current_session) {
-    @unlink($basedir . '/sess-' . $previous_session);
   }
 }
 
