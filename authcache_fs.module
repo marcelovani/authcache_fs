@@ -90,33 +90,58 @@ function authcache_fs_authcache_backend_key_set($key, $lifetime, $has_session) {
 /**
  * Implements hook_expire_cache().
  */
-function authcache_fs_expire_cache($urls, $wildcards, $object_type, $object) {
+function authcache_fs_expire_cache($urls, $wildcards = NULL, $object_type = NULL, $object = NULL) {
   $basedir = authcache_fs_root();
   if (!$basedir) {
     return;
   }
-  $basedir_pattern = authcache_fs_glob_escape($basedir);
 
-  $paths = array();
-  foreach (array_keys($urls) as $path) {
+  // Prepare parameters according to the version of the expire module. 7.x-1.x
+  // only populates $urls while 7.x-2.x passes the whole set of the parameter
+  // list.
+  if (isset($wildcards)) {
+    // No additional options necessary for 7.x-2.x urls.
+    $url_options = array();
+
+    // Internal paths are passed as array-keys.
+    $url_paths = array_keys($urls);
+  }
+  else {
+    // 7.x-1.x passes path aliases instead of the internal paths. Therefore it
+    // is necessary to prevent an additional alias-lookup from within the url()
+    // function.
+    $url_options = array(
+      'alias' => TRUE,
+    );
+
+    // Paths are passed as array-values.
+    $url_paths = $urls;
+
+    // No support for wildcards in this expire version.
+    $wildcards = array();
+  }
+
+  $fs_paths = array();
+  $basedir_pattern = authcache_fs_glob_escape($basedir);
+  foreach ($url_paths as $url_path) {
     // Convert internal path into url alias.
-    $request_uri = url($path, array('absolute' => FALSE, 'alias' => FALSE));
+    $request_uri = url($url_path, $url_options);
 
     // Derive glob pattern from url alias.
     $basename = authcache_fs_basename($request_uri);
     $basename_pattern = authcache_fs_glob_escape($basename);
 
     // Add wildcard and extension.
-    $suffix = empty($wildcards[$path]) ? '.*' : '*.*';
+    $suffix = empty($wildcards[$url_path]) ? '.*' : '*.*';
 
     // Discover all paths.
     $newpaths = glob($basedir_pattern . '/key-*/' . $basename_pattern . $suffix);
     if ($newpaths) {
-      $paths = array_merge($paths, $newpaths);
+      $fs_paths = array_merge($fs_paths, $newpaths);
     }
   }
 
-  foreach ($paths as $path) {
+  foreach ($fs_paths as $path) {
     @unlink($path);
   }
 }
