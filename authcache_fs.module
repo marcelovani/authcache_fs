@@ -8,8 +8,22 @@
  * Implements hook_boot().
  */
 function authcache_fs_boot() {
-  $vary_header = variable_get('authcache_fs_vary', 'Cookie');
-  authcache_backend_init('authcache_fs', $vary_header);
+  // The included .htaccess rules specify the environment variable
+  // authcache_fs_dir if a retrieval from the cache was attempted. Therefore we
+  // test here whether this variable is available. If it is, the filesystem
+  // backend is initialized, otherwise it is not.
+  if (isset($_SERVER['authcache_fs_dir'])) {
+    $fs_key = authcache_fs_key_from_keydir($_SERVER['authcache_fs_dir']);
+    if ($fs_key) {
+      $initial_key = $fs_key;
+    }
+    else {
+      $initial_key = authcache_backend_anonymous_key();
+    }
+
+    $vary_header = variable_get('authcache_fs_vary', 'Cookie');
+    authcache_backend_init('authcache_fs', $vary_header, $initial_key);
+  }
 }
 
 /**
