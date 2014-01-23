@@ -49,6 +49,8 @@ function authcache_fs_authcache_backend_cache_save($body, $headers, $page_compre
   }
 
   $keydir = authcache_fs_keydir();
+  @mkdir($basedir . '/' . $keydir);
+
   $filename = authcache_fs_basename();
   $filepath = $basedir . '/' . $keydir . '/' . $filename . '.' . $extension;
 
