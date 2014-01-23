@@ -197,6 +197,32 @@ function authcache_fs_file_put_contents($filename, $data) {
 }
 
 /**
+ * Create a symlink using an atomical rename operation.
+ */
+function authcache_fs_symlink($filename, $link) {
+  $basedir = realpath(dirname($link));
+  if (!$basedir) {
+    return FALSE;
+  }
+
+  // Create a temporary path.
+  $tmpfile = tempnam($basedir, 'tmp-');
+  if (!$tmpfile) {
+    return FALSE;
+  }
+  @unlink($tmpfile);
+
+  // Create symlink.
+  $ok = symlink($filename, $tmpfile);
+  if (!$ok) {
+    return FALSE;
+  }
+
+  // Replace target path with symlink.
+  return rename($tmpfile, $link);
+}
+
+/**
  * Return a mapping of MIME types to file extensions.
  */
 function authcache_fs_mimemap() {
@@ -223,6 +249,28 @@ function authcache_fs_keydir($authcache_key = NULL) {
   }
 
   return authcache_fs_uri_to_filename('key-' . $authcache_key);
+}
+
+/**
+ * Given a session or key filename, return a suitable authcache key.
+ */
+function authcache_fs_key_from_keydir($fspath) {
+  $basedir = authcache_fs_root();
+  if (!$basedir) {
+    return;
+  }
+
+  $keydir = realpath($basedir . '/' . $fspath);
+  if (!$keydir) {
+    return;
+  }
+
+  $basename = authcache_fs_filename_to_uri(basename($keydir));
+  if (strpos($basename, 'key-') !== 0) {
+    return;
+  }
+
+  return substr($basename, 4);
 }
 
 /**
