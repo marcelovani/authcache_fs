@@ -1,0 +1,53 @@
+<?php
+/**
+ * @file
+ * Install, update and uninstall functions for the Authcache Bultin module.
+ */
+
+/**
+ * Implements hook_enable().
+ */
+function authcache_fs_enable() {
+  // Did admin follow install instructions?
+  if (!_authcache_fs_backendstatus()) {
+    drupal_set_message(st('Your .htaccess file must be modified to enable Authcache fs cache backend. See <a href="@url">README.txt</a>.', array('@url' => base_path() . drupal_get_path('module', 'authcache_fs') . '/README.txt')), 'error');
+  }
+}
+
+/**
+ * Implements hook_requirements().
+ */
+function authcache_fs_requirements($phase) {
+  $requirements = array();
+  // Ensure translations don't break during installation.
+  $t = get_t();
+
+  $requirements['authcache_fs'] = array(
+    'title' => $t('Authcache filesystem cache backend'),
+  );
+
+  if (_authcache_fs_backendstatus()) {
+    $requirements['authcache_fs']['value'] = $t('Configured');
+  }
+  else {
+    $requirements['authcache_fs']['value'] = $t('The .htaccess file needs to be modified in order to allow delivery of cached pages directly from the webserver');
+    $requirements['authcache_fs']['description'] = $t('Your .htaccess file must be modified to enable Authcache fs cache backend. See <a href="@url">README.txt</a>.', array('@url' => base_path() . drupal_get_path('module', 'authcache_fs') . '/README.txt'));
+    $requirements['authcache_fs']['severity'] = ($phase == 'runtime') ? REQUIREMENT_ERROR : REQUIREMENT_WARNING;
+  }
+
+  return $requirements;
+}
+
+/**
+ * Return TRUE if .htaccess is properly configured.
+ *
+ * Verify that authcache_fs.cache.inc is the last entry in the
+ * cache_backends array.
+ *
+ * @return bool
+ *   TRUE if the configuration is sane, FALSE otherwise.
+ */
+function _authcache_fs_backendstatus() {
+  // Check whether .htaccess defines authcache_fs_file.
+  return isset($_SERVER['authcache_fs_file']);
+}

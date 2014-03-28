@@ -1,0 +1,350 @@
+<?php
+/**
+ * @file
+ * Authcache cache backend module for filesystem storage. EXPERIMENTAL!
+ */
+
+/**
+ * Implements hook_boot().
+ */
+function authcache_fs_boot() {
+  // The included .htaccess rules specify the environment variable
+  // authcache_fs_dir if a retrieval from the cache was attempted. Therefore we
+  // test here whether this variable is available. If it is, the filesystem
+  // backend is initialized, otherwise it is not.
+  if (isset($_SERVER['authcache_fs_dir'])) {
+    $fs_key = authcache_fs_key_from_keydir($_SERVER['authcache_fs_dir']);
+    if ($fs_key) {
+      $initial_key = $fs_key;
+    }
+    else {
+      $initial_key = authcache_backend_anonymous_key();
+    }
+
+    $vary_header = variable_get('authcache_fs_vary', 'Cookie');
+    authcache_backend_init('authcache_fs', $vary_header, $initial_key);
+  }
+}
+
+/**
+ * Implements hook_authcache_backend_cache_save().
+ */
+function authcache_fs_authcache_backend_cache_save($body, $headers, $page_compressed) {
+  if (isset($headers['Status']) && strpos($headers['Status'], '200') !== 0) {
+    return;
+  }
+
+  if (!isset($headers['Content-Type'])) {
+    return;
+  }
+
+  $extension = authcache_fs_extension($headers['Content-Type']);
+  if (!$extension) {
+    return;
+  }
+
+  $basedir = authcache_fs_root();
+  if (!$basedir) {
+    return;
+  }
+
+  $keydir = authcache_fs_keydir();
+  @mkdir($basedir . '/' . $keydir);
+
+  $filename = authcache_fs_basename();
+  $filepath = $basedir . '/' . $keydir . '/' . $filename . '.' . $extension;
+
+  // The content of the output buffer is guaranteed to not be compressed. Use
+  // that for the plain version of the file.
+  $plain_body = ob_get_contents();
+  authcache_fs_file_put_contents($filepath, $plain_body);
+
+  // If page compression is enabled, also save a compressed version.
+  if ($page_compressed) {
+    authcache_fs_file_put_contents($filepath . '.gz', $body);
+  }
+}
+
+/**
+ * Implements hook_authcache_backend_key_set().
+ */
+function authcache_fs_authcache_backend_key_set($key, $lifetime, $has_session) {
+  $basedir = authcache_fs_root();
+  if (!$basedir) {
+    return;
+  }
+
+  // Clear out old key.
+  $previous_session = authcache_backend_initial_session_id();
+  if ($previous_session) {
+    @unlink($basedir . '/sess-' . $previous_session);
+  }
+
+  if ($has_session && authcache_account_allows_caching()) {
+    // Symlink to key-directory.
+    $keydir = authcache_fs_keydir($key);
+    authcache_fs_symlink($keydir, $basedir . '/sess-' . session_id());
+  }
+}
+
+/**
+ * Implements hook_expire_cache().
+ */
+function authcache_fs_expire_cache($urls, $wildcards = NULL, $object_type = NULL, $object = NULL) {
+  $basedir = authcache_fs_root();
+  if (!$basedir) {
+    return;
+  }
+
+  // Prepare parameters according to the version of the expire module. 7.x-1.x
+  // only populates $urls while 7.x-2.x passes the whole set of the parameter
+  // list.
+  if (isset($wildcards)) {
+    // No additional options necessary for 7.x-2.x urls.
+    $url_options = array();
+
+    // Internal paths are passed as array-keys.
+    $url_paths = array_keys($urls);
+  }
+  else {
+    // 7.x-1.x passes path aliases instead of the internal paths. Therefore it
+    // is necessary to prevent an additional alias-lookup from within the url()
+    // function.
+    $url_options = array(
+      'alias' => TRUE,
+    );
+
+    // Paths are passed as array-values.
+    $url_paths = $urls;
+
+    // No support for wildcards in this expire version.
+    $wildcards = array();
+  }
+
+  $fs_paths = array();
+  $basedir_pattern = authcache_fs_glob_escape($basedir);
+  foreach ($url_paths as $url_path) {
+    // Convert internal path into url alias.
+    $request_uri = url($url_path, $url_options);
+
+    // Derive glob pattern from url alias.
+    $basename = authcache_fs_basename($request_uri);
+    $basename_pattern = authcache_fs_glob_escape($basename);
+
+    // Add wildcard and extension.
+    $suffix = empty($wildcards[$url_path]) ? '.*' : '*.*';
+
+    // Discover all paths.
+    $newpaths = glob($basedir_pattern . '/key-*/' . $basename_pattern . $suffix);
+    if ($newpaths) {
+      $fs_paths = array_merge($fs_paths, $newpaths);
+    }
+  }
+
+  foreach ($fs_paths as $path) {
+    @unlink($path);
+  }
+}
+
+/**
+ * Implements hook_cron().
+ */
+function authcache_fs_cron() {
+  $basedir = authcache_fs_root();
+  if (!$basedir) {
+    return;
+  }
+
+  $paths = glob(authcache_fs_glob_escape($basedir) . '/sess-*');
+  if (!$paths) {
+    return;
+  }
+
+  $lifetime = authcache_key_lifetime();
+  if ($lifetime > 0) {
+    foreach ($paths as $index => $path) {
+      $changed = @filectime($path);
+      // If this session is still valid, preserve it from being removed.
+      if ($changed && $changed + $lifetime > REQUEST_TIME) {
+        unset($paths[$index]);
+      }
+    }
+  }
+
+  // Remove expired session symlinks.
+  foreach ($paths as $path) {
+    @unlink($path);
+  }
+}
+
+/**
+ * Construct a glob-pattern given a request uri and file extension.
+ */
+function authcache_fs_glob_escape($filename) {
+  // Escape glob-characters.
+  $substitutions = array(
+    '?' => '\\?',
+    '*' => '\\*',
+    '[' => '\\[',
+    '\\' => '\\\\',
+    ']' => '\\]',
+  );
+  return strtr($filename, $substitutions);
+}
+
+/**
+ * Write contents to a file atomically.
+ */
+function authcache_fs_file_put_contents($filename, $data) {
+  $basedir = realpath(dirname($filename));
+  if (!$basedir) {
+    return FALSE;
+  }
+
+  $tmpfile = tempnam($basedir, 'tmp-');
+  if (!$tmpfile) {
+    return FALSE;
+  }
+
+  $size = file_put_contents($tmpfile, $data);
+  if ($size === FALSE) {
+    return FALSE;
+  }
+
+  return rename($tmpfile, $filename) ? $size : FALSE;
+}
+
+/**
+ * Create a symlink using an atomical rename operation.
+ */
+function authcache_fs_symlink($filename, $link) {
+  $basedir = realpath(dirname($link));
+  if (!$basedir) {
+    return FALSE;
+  }
+
+  // Create a temporary path.
+  $tmpfile = tempnam($basedir, 'tmp-');
+  if (!$tmpfile) {
+    return FALSE;
+  }
+  @unlink($tmpfile);
+
+  // Create symlink.
+  $ok = symlink($filename, $tmpfile);
+  if (!$ok) {
+    return FALSE;
+  }
+
+  // Replace target path with symlink.
+  return rename($tmpfile, $link);
+}
+
+/**
+ * Return a mapping of MIME types to file extensions.
+ */
+function authcache_fs_mimemap() {
+  return variable_get('authcache_fs_mimemap', array(
+    'text/html' => 'html',
+    'application/xml' => 'xml',
+    'text/javascript' => 'js',
+  ));
+}
+
+/**
+ * Return the absolute path to the cache root directory.
+ */
+function authcache_fs_root() {
+  return realpath(variable_get('authcache_fs_root', 'authcache'));
+}
+
+/**
+ * Construct the basename of the key directory for the given key.
+ */
+function authcache_fs_keydir($authcache_key = NULL) {
+  if (!isset($authcache_key)) {
+    $authcache_key = authcache_key();
+  }
+
+  return authcache_fs_uri_to_filename('key-' . $authcache_key);
+}
+
+/**
+ * Given a session or key filename, return a suitable authcache key.
+ */
+function authcache_fs_key_from_keydir($fspath) {
+  $basedir = authcache_fs_root();
+  if (!$basedir) {
+    return;
+  }
+
+  $keydir = realpath($basedir . '/' . $fspath);
+  if (!$keydir) {
+    return;
+  }
+
+  $basename = authcache_fs_filename_to_uri(basename($keydir));
+  if (strpos($basename, 'key-') !== 0) {
+    return;
+  }
+
+  return substr($basename, 4);
+}
+
+/**
+ * Construct the basename without file extension for given requset uri.
+ */
+function authcache_fs_basename($request_uri = NULL) {
+  $normal_uri = authcache_fs_normal_request_uri($request_uri);
+  return authcache_fs_uri_to_filename($normal_uri);
+}
+
+/**
+ * Return an appropriate file extension for the given content-type header.
+ */
+function authcache_fs_extension($content_type_header) {
+  $content_type = authcache_get_content_type($content_type_header);
+  $mimemap = authcache_fs_mimemap();
+  if (!isset($mimemap[$content_type['mimetype']])) {
+    return;
+  }
+
+  return $mimemap[$content_type['mimetype']];
+}
+
+/**
+ * Strip leading slashes from URI and append query separator if necessary.
+ */
+function authcache_fs_normal_request_uri($uri = NULL) {
+  if (!isset($uri)) {
+    $uri = request_uri();
+  }
+  $uri = ltrim($uri, '/');
+  if (strpos($uri, '?') === FALSE) {
+    $uri .= '?';
+  }
+
+  return $uri;
+}
+
+/**
+ * Substitute directory separator and query string separator.
+ */
+function authcache_fs_uri_to_filename($uri) {
+  $substitutions = array(
+    '/' => '|',
+    '?' => '^',
+  );
+  return strtr($uri, $substitutions);
+}
+
+/**
+ * Revert substitution of directory separator and query string separator.
+ */
+function authcache_fs_filename_to_uri($fspath) {
+  $substitutions = array(
+    '|' => '/',
+    '^' => '?',
+  );
+  return strtr($fspath, $substitutions);
+}
