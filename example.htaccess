@@ -8,20 +8,20 @@
 
   # Point authcache dir to symlink for the current session if one is open.
   RewriteCond %{HTTP_COOKIE} SESS[a-z0-9]+=([A-Za-z0-9_-]+)
-  RewriteRule .* - [E=authcache_fs_dir=%{ENV:authcache_fs_root}/sess/%1]";
+  RewriteRule .* - [E=authcache_fs_dir=%{ENV:authcache_fs_root}/sess/%1]
 
   # Prevent redirect loop
   RewriteCond %{ENV:REDIRECT_STATUS} 200
-  RewriteRule .* - [E=!authcache_fs_dir];
+  RewriteRule .* - [E=!authcache_fs_dir]
 
   # Exclude this request (unset authcache_fs_dir variable) if this is not a
   # GET/HEAD request.
   RewriteCond %{REQUEST_METHOD} !^(GET|HEAD)$
-  RewriteRule .* - [E=!authcache_fs_dir];
+  RewriteRule .* - [E=!authcache_fs_dir]
   
   # Exclude this request if a no-cache cookie is set.
   RewriteCond %{HTTP_COOKIE} !(NO_CACHE|nocache)=
-  RewriteRule .* - [E=!authcache_fs_dir];
+  RewriteRule .* - [E=!authcache_fs_dir]
 
   # Determine whether it is possible to serve compressed content. This feature
   # depends an (A) whether the user-agent is capable of interpreting gzipped
@@ -37,13 +37,13 @@
   </IfModule>
 
   # text/html + gzip
-  RewriteCond %{ENV:authcache_fs_dir}
-  RewriteCond %{ENV:authcache_try_gzip}
+  RewriteCond %{ENV:authcache_fs_dir} (.+)
+  RewriteCond %{ENV:authcache_try_gzip} (.+)
   RewriteCond    %{ENV:authcache_sf_dir}{REQUEST_URI}?%{QUERY_STRING}.html.gz -s
   RewriteRule .* %{ENV:authcache_sf_dir}{REQUEST_URI}?%{QUERY_STRING}.html.gz [L,T=text/html,E=no-gzip:1]
 
   # text/html
-  RewriteCond %{ENV:authcache_fs_dir}
+  RewriteCond %{ENV:authcache_fs_dir} (.+)
   RewriteCond    %{ENV:authcache_sf_dir}{REQUEST_URI}?%{QUERY_STRING}.html -s
   RewriteRule .* %{ENV:authcache_sf_dir}{REQUEST_URI}?%{QUERY_STRING}.html [L,T=text/html,E=no-gzip:1]
 
