@@ -41,13 +41,10 @@ function authcache_fs_requirements($phase) {
 /**
  * Return TRUE if .htaccess is properly configured.
  *
- * Verify that authcache_fs.cache.inc is the last entry in the
- * cache_backends array.
- *
  * @return bool
  *   TRUE if the configuration is sane, FALSE otherwise.
  */
 function _authcache_fs_backendstatus() {
   // Check whether .htaccess defines authcache_fs_file.
-  return isset($_SERVER['authcache_fs_file']);
+  return isset($_SERVER['authcache_fs_dir']);
 }
