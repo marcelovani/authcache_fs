@@ -30,10 +30,6 @@
   RewriteCond %{HTTP_COOKIE} (NO_CACHE|nocache)=
   RewriteRule .* - [E=!authcache_fs_dir]
 
-  # Exclude this request if it has the wrong IP
-  RewriteCond %{HTTP_HOST} !127\.0\.0\.9
-  RewriteRule .* - [E=!authcache_fs_dir]
-
   # Authcache delivery rules.
 
   # text/html
